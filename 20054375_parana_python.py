@@ -171,6 +171,175 @@ def display_order_history(connection, shopper_id):
         print(f"Status: {ordered_product_status}")
         print("-" * 60)
 
+
+def get_product_categories(connection):
+    cursor = connection.execute(
+        """
+        SELECT
+            category_id,
+            category_description
+        FROM categories
+        ORDER BY category_description
+        """
+    )
+
+    return cursor.fetchall()
+
+def display_options(all_options, title, option_type):
+    option_ids = []
+
+    print(f"\n{title}")
+
+    for option_number, option in enumerate(all_options, start=1):
+        option_id = option[0]
+        option_description = option[1]
+
+        print(f"{option_number}. {option_description}")
+        option_ids.append(option_id)
+
+    while True:
+        selected_option = get_valid_integer(
+            f"Enter the number against the {option_type} you want to choose: "
+        )
+
+        if 1 <= selected_option <= len(option_ids):
+            return option_ids[selected_option - 1]
+
+        print("Please enter a valid option number.")
+
+def select_product_category(connection):
+    categories = get_product_categories(connection)
+
+    return display_options(
+        categories,
+        "Product Categories",
+        "product category"
+    )
+
+def get_available_products(connection, category_id):
+    cursor = connection.execute(
+        """
+        SELECT
+            product_id,
+            product_description
+        FROM products
+        WHERE category_id = ?
+        AND product_status = 'Available'
+        ORDER BY product_description
+        """,
+        (category_id,)
+    )
+
+    return cursor.fetchall()
+
+def select_product(connection, category_id):
+    products = get_available_products(
+        connection,
+        category_id
+    )
+
+    return display_options(
+        products,
+        "Available Products",
+        "product"
+    )
+
+def get_product_sellers(connection, product_id):
+    cursor = connection.execute(
+        """
+        SELECT
+            s.seller_id,
+            s.seller_name || ' - £' || printf('%.2f', ps.price)
+        FROM product_sellers AS ps
+        JOIN sellers AS s
+            ON ps.seller_id = s.seller_id
+        WHERE ps.product_id = ?
+        ORDER BY s.seller_name
+        """,
+        (product_id,)
+    )
+
+    return cursor.fetchall()
+
+def select_seller(connection, product_id):
+    sellers = get_product_sellers(
+        connection,
+        product_id
+    )
+
+    return display_options(
+        sellers,
+        "Available Sellers",
+        "seller"
+    )
+
+def get_valid_quantity():
+    while True:
+        quantity = get_valid_integer(
+            "Enter the quantity you want to order: "
+        )
+
+        if quantity > 0:
+            return quantity
+
+        print("The quantity must be greater than 0")
+
+
+def get_selected_product_price(connection, product_id, seller_id):
+    cursor = connection.execute(
+        """
+        SELECT price
+        FROM product_sellers
+        WHERE product_id = ?
+        AND seller_id = ?
+        """,
+        (product_id, seller_id)
+    )
+
+    result = cursor.fetchone()
+
+    return result[0]
+
+def add_item_to_basket(
+    connection,
+    basket_id,
+    product_id,
+    seller_id,
+    quantity,
+    price
+):
+    try:
+        connection.execute(
+            """
+            INSERT INTO basket_contents
+            (
+                basket_id,
+                product_id,
+                seller_id,
+                quantity,
+                price
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                basket_id,
+                product_id,
+                seller_id,
+                quantity,
+                price
+            )
+        )
+
+        connection.commit()
+
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        print("This product is already in your basket.")
+        return False
+
+    return True
+
+
 def main():
     connection = None
 
@@ -198,6 +367,51 @@ def main():
 
             if menu_choice == 1:
                 display_order_history(connection, shopper_id)
+
+
+
+            elif menu_choice == 2:
+
+                selected_category_id = select_product_category(connection)
+
+                selected_product_id = select_product(
+
+                    connection,
+
+                    selected_category_id
+
+                )
+
+                selected_seller_id = select_seller(
+
+                    connection,
+
+                    selected_product_id
+
+                )
+
+                quantity = get_valid_quantity()
+
+                selected_price = get_selected_product_price(
+                    connection,
+                    selected_product_id,
+                    selected_seller_id
+                )
+
+                print(f"Selected price: £{selected_price:.2f}")
+
+                item_added = add_item_to_basket(
+                    connection,
+                    current_basket_id,
+                    selected_product_id,
+                    selected_seller_id,
+                    quantity,
+                    selected_price
+                )
+
+                if item_added:
+                    print("Item added to your basket")
+
 
             elif menu_choice == 7:
                 print("Goodbye.")
