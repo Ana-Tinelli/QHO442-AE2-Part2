@@ -1,0 +1,8 @@
+.idea/
+20054375_parana_sequence_test.db
+parana.db
+__pycache__/
+*.pyc
+*.db-journal
+*.db-wal
+*.db-shm
