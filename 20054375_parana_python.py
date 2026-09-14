@@ -32,6 +32,7 @@ def get_shopper(connection, shopper_id):
     )
     return cursor.fetchone()
 
+# Retrieves today's most recent basket for the shopper or creates a new one.
 def get_or_create_current_basket(connection, shopper_id):
     cursor = connection.execute(
         """
@@ -50,6 +51,7 @@ def get_or_create_current_basket(connection, shopper_id):
     if basket is not None:
         return basket[0]
 
+    # Gets the next basket ID from sqlite_sequence when a new basket is required.
     sequence_row = connection.execute(
         """
         SELECT seq
@@ -64,6 +66,7 @@ def get_or_create_current_basket(connection, shopper_id):
     else:
         new_basket_id = sequence_row[0] + 1
 
+    # Creates the new basket and commits the transaction.
     try:
         connection.execute(
             """
@@ -79,6 +82,7 @@ def get_or_create_current_basket(connection, shopper_id):
         )
         connection.commit()
 
+    # Rolls back the basket creation if a database error occurs.
     except sqlite3.Error:
         connection.rollback()
         raise
@@ -107,6 +111,7 @@ def get_menu_choice():
 
         print("Please enter a number between 1 and 7.")
 
+# Retrieves the shopper's order history, including product status.
 def get_order_history(connection, shopper_id):
     cursor = connection.execute(
         """
@@ -185,6 +190,7 @@ def get_product_categories(connection):
 
     return cursor.fetchall()
 
+# Displays numbered options and returns the real database ID selected by the user.
 def display_options(all_options, title, option_type):
     option_ids = []
 
@@ -300,6 +306,7 @@ def get_selected_product_price(connection, product_id, seller_id):
 
     return result[0]
 
+# Inserts the selected item into the current basket.
 def add_item_to_basket(
     connection,
     basket_id,
@@ -332,6 +339,7 @@ def add_item_to_basket(
 
         connection.commit()
 
+    # Handles duplicate basket items and rolls back the failed transaction.
     except sqlite3.IntegrityError:
         connection.rollback()
         print("This product is already in your basket.")
@@ -339,7 +347,65 @@ def add_item_to_basket(
 
     return True
 
+def get_basket_contents(connection, basket_id):
+    cursor = connection.execute(
+        """
+        SELECT
+            p.product_description,
+            s.seller_name,
+            bc.price,
+            bc.quantity
+        FROM basket_contents AS bc
+        JOIN products AS p
+            ON bc.product_id = p.product_id
+        JOIN sellers AS s
+            ON bc.seller_id = s.seller_id
+        WHERE bc.basket_id = ?
+        ORDER BY p.product_description
+        """,
+        (basket_id,)
+    )
 
+    return cursor.fetchall()
+
+# Displays the current basket and calculates item totals and the overall basket total.
+def display_basket(connection, basket_id):
+    basket_items = get_basket_contents(
+        connection,
+        basket_id
+    )
+
+    if not basket_items:
+        print("\nYour basket is empty")
+        return
+
+    print("\nYOUR BASKET")
+    print("-" * 60)
+
+    basket_total = 0
+
+    for item_number, item in enumerate(basket_items, start=1):
+        (
+            product_description,
+            seller_name,
+            price,
+            quantity
+        ) = item
+
+        item_total = price * quantity
+        basket_total += item_total
+
+        print(f"Basket item no.: {item_number}")
+        print(f"Product: {product_description}")
+        print(f"Seller: {seller_name}")
+        print(f"Price: £{price:.2f}")
+        print(f"Quantity: {quantity}")
+        print(f"Item total: £{item_total:.2f}")
+        print("-" * 60)
+
+    print(f"Basket total: £{basket_total:.2f}")
+
+# Controls the main program flow and menu navigation.
 def main():
     connection = None
 
@@ -398,8 +464,6 @@ def main():
                     selected_seller_id
                 )
 
-                print(f"Selected price: £{selected_price:.2f}")
-
                 item_added = add_item_to_basket(
                     connection,
                     current_basket_id,
@@ -412,6 +476,11 @@ def main():
                 if item_added:
                     print("Item added to your basket")
 
+            elif menu_choice == 3:
+                display_basket(
+                    connection,
+                    current_basket_id
+                )
 
             elif menu_choice == 7:
                 print("Goodbye.")
@@ -420,6 +489,7 @@ def main():
     except sqlite3.Error as error:
         print(f"Database error: {error}")
 
+    # Ensures that the database connection is always closed
     finally:
         if connection is not None:
             connection.close()
