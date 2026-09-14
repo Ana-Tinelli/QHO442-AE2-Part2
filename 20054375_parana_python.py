@@ -354,7 +354,8 @@ def get_basket_contents(connection, basket_id):
             p.product_description,
             s.seller_name,
             bc.price,
-            bc.quantity
+            bc.quantity,
+            bc.product_id
         FROM basket_contents AS bc
         JOIN products AS p
             ON bc.product_id = p.product_id
@@ -367,6 +368,21 @@ def get_basket_contents(connection, basket_id):
     )
 
     return cursor.fetchall()
+
+# Selects a basket item, automatically when there is only one item.
+def select_basket_item(basket_items, action):
+    if len(basket_items) == 1:
+        return basket_items[0]
+
+    while True:
+        item_number = get_valid_integer(
+            f"Enter the basket item no. you want to {action}: "
+        )
+
+        if 1 <= item_number <= len(basket_items):
+            return basket_items[item_number - 1]
+
+        print("The basket item no. you have entered is invalid")
 
 # Displays the current basket and calculates item totals and the overall basket total.
 def display_basket(connection, basket_id):
@@ -389,7 +405,8 @@ def display_basket(connection, basket_id):
             product_description,
             seller_name,
             price,
-            quantity
+            quantity,
+            _product_id
         ) = item
 
         item_total = price * quantity
@@ -404,6 +421,88 @@ def display_basket(connection, basket_id):
         print("-" * 60)
 
     print(f"Basket total: £{basket_total:.2f}")
+
+# Updates the quantity of a selected item in the current basket.
+def update_basket_item_quantity(
+    connection,
+    basket_id,
+    product_id,
+    new_quantity
+):
+    try:
+        cursor = connection.execute(
+            """
+            UPDATE basket_contents
+            SET quantity = ?
+            WHERE basket_id = ?
+            AND product_id = ?
+            """,
+            (
+                new_quantity,
+                basket_id,
+                product_id
+            )
+        )
+
+        if cursor.rowcount != 1:
+            connection.rollback()
+            print("Unable to update the basket item.")
+            return False
+
+        connection.commit()
+
+    except sqlite3.Error as error:
+        connection.rollback()
+        print(f"Unable to update the basket item: {error}")
+        return False
+
+    return True
+
+# Starts the process of changing the quantity of a basket item.
+def change_basket_item_quantity(connection, basket_id):
+    basket_items = get_basket_contents(
+        connection,
+        basket_id
+    )
+
+    if not basket_items:
+        print("\nYour basket is empty")
+        return
+
+    display_basket(
+        connection,
+        basket_id
+    )
+
+    selected_item = select_basket_item(
+        basket_items,
+        "change"
+    )
+
+    while True:
+        new_quantity = get_valid_integer(
+            "Enter the new quantity: "
+        )
+
+        if new_quantity > 0:
+            break
+
+        print("The quantity must be greater than 0")
+
+    product_id = selected_item[4]
+
+    item_updated = update_basket_item_quantity(
+        connection,
+        basket_id,
+        product_id,
+        new_quantity
+    )
+
+    if item_updated:
+        display_basket(
+            connection,
+            basket_id
+        )
 
 # Controls the main program flow and menu navigation.
 def main():
@@ -433,7 +532,6 @@ def main():
 
             if menu_choice == 1:
                 display_order_history(connection, shopper_id)
-
 
 
             elif menu_choice == 2:
@@ -478,6 +576,12 @@ def main():
 
             elif menu_choice == 3:
                 display_basket(
+                    connection,
+                    current_basket_id
+                )
+
+            elif menu_choice == 4:
+                change_basket_item_quantity(
                     connection,
                     current_basket_id
                 )
