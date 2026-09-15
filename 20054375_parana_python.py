@@ -503,6 +503,86 @@ def change_basket_item_quantity(connection, basket_id):
             connection,
             basket_id
         )
+# Removes a selected item from the current basket.
+def delete_basket_item(
+    connection,
+    basket_id,
+    product_id
+):
+    try:
+        cursor = connection.execute(
+            """
+            DELETE FROM basket_contents
+            WHERE basket_id = ?
+            AND product_id = ?
+            """,
+            (
+                basket_id,
+                product_id
+            )
+        )
+
+        if cursor.rowcount != 1:
+            connection.rollback()
+            print("Unable to remove the basket item.")
+            return False
+
+        connection.commit()
+
+    except sqlite3.Error as error:
+        connection.rollback()
+        print(f"Unable to remove the basket item: {error}")
+        return False
+
+    return True
+
+# Starts the process of removing an item from the current basket.
+def remove_basket_item(connection, basket_id):
+    basket_items = get_basket_contents(
+        connection,
+        basket_id
+    )
+
+    if not basket_items:
+        print("\nYour basket is empty")
+        return
+
+    display_basket(
+        connection,
+        basket_id
+    )
+
+    selected_item = select_basket_item(
+        basket_items,
+        "remove"
+    )
+
+    product_id = selected_item[4]
+
+    while True:
+        confirmation = input(
+            "Are you sure you want to remove this item? (Y/N): "
+        ).strip().upper()
+
+        if confirmation in ("Y", "N"):
+            break
+
+        print("Please enter Y or N.")
+
+    if confirmation == "N":
+        return
+
+    item_removed = delete_basket_item(
+        connection,
+        basket_id,
+        product_id
+    )
+
+    if item_removed:
+        display_basket(
+            connection,
+            basket_id
+        )
 
 # Controls the main program flow and menu navigation.
 def main():
@@ -582,6 +662,12 @@ def main():
 
             elif menu_choice == 4:
                 change_basket_item_quantity(
+                    connection,
+                    current_basket_id
+                )
+
+            elif menu_choice == 5:
+                remove_basket_item(
                     connection,
                     current_basket_id
                 )
