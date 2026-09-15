@@ -52,14 +52,18 @@ def get_or_create_current_basket(connection, shopper_id):
         return basket[0]
 
     # Gets the next basket ID from sqlite_sequence when a new basket is required.
-    sequence_row = connection.execute(
-        """
-        SELECT seq
-        FROM sqlite_sequence
-        WHERE name = ?
-        """,
-        ("shopper_baskets",)
-    ).fetchone()
+    try:
+        sequence_row = connection.execute(
+            """
+            SELECT seq
+            FROM sqlite_sequence
+            WHERE name = ?
+            """,
+            ("shopper_baskets",)
+        ).fetchone()
+
+    except sqlite3.OperationalError:
+        sequence_row = None
 
     if sequence_row is None:
         new_basket_id = 1
@@ -369,6 +373,158 @@ def get_basket_contents(connection, basket_id):
 
     return cursor.fetchall()
 
+# Retrieves the current basket items required for checkout.
+def get_checkout_basket_items(connection, basket_id):
+    cursor = connection.execute(
+        """
+        SELECT
+            product_id,
+            seller_id,
+            quantity,
+            price
+        FROM basket_contents
+        WHERE basket_id = ?
+        ORDER BY product_id
+        """,
+        (basket_id,)
+    )
+
+    return cursor.fetchall()
+
+# Creates a new shopper order and returns the generated order ID.
+def create_order(connection, shopper_id):
+    cursor = connection.execute(
+        """
+        INSERT INTO shopper_orders
+        (
+            shopper_id,
+            order_date,
+            order_status
+        )
+        VALUES (?, DATE('now'), ?)
+        """,
+        (
+            shopper_id,
+            "Placed"
+        )
+    )
+
+    return cursor.lastrowid
+
+# Inserts all current basket items into the new order.
+def insert_ordered_products(
+    connection,
+    order_id,
+    basket_items
+):
+    for basket_item in basket_items:
+        (
+            product_id,
+            seller_id,
+            quantity,
+            price
+        ) = basket_item
+
+        connection.execute(
+            """
+            INSERT INTO ordered_products
+            (
+                order_id,
+                product_id,
+                seller_id,
+                quantity,
+                price,
+                ordered_product_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                order_id,
+                product_id,
+                seller_id,
+                quantity,
+                price,
+                "Placed"
+            )
+        )
+
+# Removes the checked-out basket contents and then the basket itself.
+def delete_checked_out_basket(connection, basket_id):
+    connection.execute(
+        """
+        DELETE FROM basket_contents
+        WHERE basket_id = ?
+        """,
+        (basket_id,)
+    )
+
+    connection.execute(
+        """
+        DELETE FROM shopper_baskets
+        WHERE basket_id = ?
+        """,
+        (basket_id,)
+    )
+
+# Starts the checkout process for the current basket.
+def checkout_basket(connection, shopper_id, basket_id):
+    basket_items = get_checkout_basket_items(
+        connection,
+        basket_id
+    )
+
+    if not basket_items:
+        print("\nYour basket is empty")
+        return False
+
+    display_basket(
+        connection,
+        basket_id
+    )
+
+    while True:
+        confirmation = input(
+            "Do you wish to proceed with the checkout? (Y/N): "
+        ).strip().upper()
+
+        if confirmation in ("Y", "N"):
+            break
+
+        print("Please enter Y or N.")
+
+    if confirmation == "N":
+        return False
+
+    try:
+        order_id = create_order(
+            connection,
+            shopper_id
+        )
+
+        insert_ordered_products(
+            connection,
+            order_id,
+            basket_items
+        )
+
+        delete_checked_out_basket(
+            connection,
+            basket_id
+        )
+
+        connection.commit()
+
+        print(
+            "Checkout complete, your order has been placed"
+        )
+
+        return True
+
+    except sqlite3.Error as error:
+        connection.rollback()
+        print(f"Checkout failed: {error}")
+        return False
+
 # Selects a basket item, automatically when there is only one item.
 def select_basket_item(basket_items, action):
     if len(basket_items) == 1:
@@ -615,6 +771,12 @@ def main():
 
 
             elif menu_choice == 2:
+                if current_basket_id is None:
+                    current_basket_id = get_or_create_current_basket(
+                        connection,
+                        shopper_id
+                    )
+                    print(f"Current basket ID: {current_basket_id}")
 
                 selected_category_id = select_product_category(connection)
 
@@ -671,6 +833,22 @@ def main():
                     connection,
                     current_basket_id
                 )
+
+
+            elif menu_choice == 6:
+
+                checkout_complete = checkout_basket(
+
+                    connection,
+
+                    shopper_id,
+
+                    current_basket_id
+
+                )
+
+                if checkout_complete:
+                    current_basket_id = None
 
             elif menu_choice == 7:
                 print("Goodbye.")
